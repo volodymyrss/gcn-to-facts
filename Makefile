@@ -7,4 +7,5 @@ pylint:
 mypy:
 	mypy *py
 
-
+autopep8:
+	autopep8 *py
