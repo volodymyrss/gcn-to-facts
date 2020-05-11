@@ -48,3 +48,41 @@ def test_workflows():
 
     print(G.serialize(format='n3').decode())
 
+def test_integral_grb():
+    import gcnfacts as gf
+    import rdflib
+
+    G = rdflib.Graph()
+
+    t = gf.gcn_workflows(27634) # integral
+
+    G.parse(data=t, format="n3")
+
+    print(G.serialize(format='n3').decode())
+
+def test_lvc_workflows():
+    import gcnfacts as gf
+    import rdflib
+
+    G = rdflib.Graph()
+
+    t = gf.gcn_workflows(27388) # integral
+
+    G.parse(data=t, format="n3")
+
+    print(G.serialize(format='n3').decode())
+
+def test_gcns_workflows():
+    import gcnfacts as gf
+    import rdflib
+
+    G = rdflib.Graph()
+
+    t = gf.gcns_workflows(27010, 28670) # integral
+
+    G.parse(data=t, format="n3")
+
+    open("t.n3", "w").write(t)
+
+    print(t)
+
