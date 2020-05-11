@@ -8,7 +8,7 @@ workflow_context = []
 
 
 def workflow(f):
-    setattr(sys.modules[f.__module__], '_' + f.__name__, f)
+    setattr(sys.modules[f.__module__], f.__name__[1:], f)
     workflow_context.append((f.__name__, f))
     return f
 
@@ -21,7 +21,7 @@ def cli():
 @cli.command()
 @click.argument('gcnid', type=int)
 @workflow
-def gcn_source(gcnid: int) -> str:  # -> gcn
+def _gcn_source(gcnid: int) -> str:  # -> gcn
     t = requests.get("https://gcn.gsfc.nasa.gov/gcn3/%i.gcn3" % gcnid).text
 
     print(t)
@@ -31,7 +31,7 @@ def gcn_source(gcnid: int) -> str:  # -> gcn
 
 @cli.command()
 @workflow
-def gcn_list_recent():
+def _gcn_list_recent():
     gt = requests.get("https://gcn.gsfc.nasa.gov/gcn3_archive.html").text
 
     r = re.findall(r"<A HREF=(gcn3/\d{1,5}.gcn3)>(\d{1,5})</A>", gt)
