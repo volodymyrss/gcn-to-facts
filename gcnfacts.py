@@ -192,7 +192,7 @@ def gcns_workflows(gcnid1, gcnid2):
 
 @cli.command()
 def learn():
-    t = gcns_workflows(17000, 28000)
+    t = gcns_workflows(1500, 28000)
     open("knowledge.n3", "w").write(t)
 
 @cli.command()
