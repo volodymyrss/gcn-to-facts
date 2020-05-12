@@ -1,5 +1,7 @@
 import re
 import sys
+import json
+from datetime import datetime
 import requests
 import click
 import rdflib
@@ -73,13 +75,21 @@ def gcn_meta(gcntext: str):  # ->
 
 @workflow
 def gcn_date(gcntext: str) -> float:  # date
-    gcn_meta(gcntext)
+    t = datetime.strptime(gcn_meta(gcntext)['DATE'], "%y/%m/%d %H:%M:%S GMT").timestamp()
+
+    return dict(timestamp=t)
+
+@workflow
+def gcn_integral_lvc_countepart_search(gcntext: str):  # ->
+    r = re.search("SUBJECT:(LIGO/Virgo.*?):.*INTEGRAL", gcntext, re.I)
+
+    original_event = r.groups()[0].strip()
 
     return dict(original_event=original_event)
 
 
 @workflow
-def gcn_countepart_search(gcntext: str):  # ->
+def gcn_integral_countepart_search(gcntext: str):  # ->
     r = re.search("SUBJECT:(.*?):.*counterpart.*INTEGRAL", gcntext, re.I)
 
     original_event = r.groups()[0].strip()
@@ -107,7 +117,15 @@ def gcn_grb_integral_circular(gcntext: str):  # ->
     r = re.search("SUBJECT:.*?(GRB.*?):.*INTEGRAL.*", 
                   gcntext, re.I).groups()[0].strip()
 
-    return dict(integral_grb_report=r)
+    grbname = r
+    
+    grbtime = re.search("(\d\d:\d\d:\d\d) +UT", 
+                  gcntext, re.I).groups()[0].strip()
+
+    date=grbname.replace("GRB","").strip()
+    utc = "20" + date[:2] + "-" + date[2:4] + "-" + date[4:6] + " " + grbtime
+
+    return dict(integral_grb_report=grbname, event_t0=utc)
 
 @workflow
 def gcn_lvc_integral_counterpart(gcntext: str):  # ->
@@ -134,7 +152,12 @@ def gcn_workflows(gcnid):
             print(Fore.GREEN+"found:"+Style.RESET_ALL, gcnid, wn, o)
 
             for k,v in o.items():
-                G.update('INSERT DATA {{ gcn:gcn{gcnid} gcn:{prop} "{value}" }}'.format(gcnid=gcnid, prop=k, value=v))
+                if isinstance(v, float):
+                    v="%.20lg"%v
+                else:
+                    v="\""+str(v)+"\""
+
+                G.update('INSERT DATA {{ gcn:gcn{gcnid} gcn:{prop} {value} }}'.format(gcnid=gcnid, prop=k, value=v))
 
             print()
 
@@ -144,7 +167,7 @@ def gcn_workflows(gcnid):
     #G.
     print("gcn", gcnid, "facts", len(list(G)))
 
-    if len(list(G))<=2:
+    if len(list(G))<=3:
         raise BoringGCN
 
     return G.serialize(format='n3').decode()
@@ -181,18 +204,45 @@ def contemplate():
 
     print("parsed", len(list(G)))
 
+    s = []
+
     for rep_gcn_prop in "gcn:lvc_event_report", "gcn:reports_icecube_event":
         for r in G.query("""
-                    SELECT ?c ?ic_d ?ct_d WHERE {{
+                    SELECT ?c ?ic_d ?ct_d ?t0 WHERE {{
                             ?ic_g {rep_gcn_prop} ?c . 
                             ?ct_g ?p ?c . 
                             ?ic_g gcn:DATE ?ic_d . 
-                            ?ct_g gcn:DATE ?ct_d 
+                            ?ct_g gcn:DATE ?ct_d .
+                            ?ct_g gcn:original_event_utc ?t0 .
                         }}
                 """.format(rep_gcn_prop=rep_gcn_prop)):
             if r[1] != r[2]:
                 print(r)
+                s.append(dict(
+                        event=str(r[0]),
+                        event_gcn_time=str(r[1]),
+                        counterpart_gcn_time=str(r[2]),
+                        event_t0=str(r[3]),
+                    ))
 
+    json.dump(s, open("counterpart_gcn_reaction_summary.json", "w"))
+    
+    s = []
+    for r in G.query("""
+                    SELECT ?grb ?t0 ?gcn_d WHERE {{
+                            ?gcn gcn:integral_grb_report ?grb . 
+                            ?gcn gcn:DATE ?gcn_d . 
+                            ?gcn gcn:event_t0 ?t0 .
+                        }}
+                """.format(rep_gcn_prop=rep_gcn_prop)):
+        if r[1] != r[2]:
+            print(r)
+            s.append(dict(
+                    event=str(r[0]),
+                    event_t0=str(r[1]),
+                    event_gcn_time=str(r[2]),
+                ))
+    json.dump(s, open("grb_gcn_reaction_summary.json", "w"))
 
 if __name__ == "__main__":
     cli()
