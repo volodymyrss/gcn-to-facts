@@ -95,8 +95,19 @@ def gcn_integral_countepart_search(gcntext: str):  # ->
     original_event = r.groups()[0].strip()
 
     original_event_utc = re.search(r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) UTC, hereafter T0", gcntext).groups()[0]
+    
+    instruments = []
+    if re.search("SUBJECT:(.*?):.*ACS.*", gcntext, re.I):
+        instruments.append("acs")
 
-    return dict(original_event=original_event, original_event_utc=original_event_utc)
+    if re.search("SUBJECT:(.*?):.*IBIS.*", gcntext, re.I):
+        instruments.append("ibis")
+
+    return dict(
+                original_event=original_event, 
+                original_event_utc=original_event_utc,
+                instrument=instruments,
+            )
 
 @workflow
 def gcn_icecube_circular(gcntext: str):  # ->
@@ -152,12 +163,21 @@ def gcn_workflows(gcnid):
             print(Fore.GREEN+"found:"+Style.RESET_ALL, gcnid, wn, o)
 
             for k,v in o.items():
-                if isinstance(v, float):
-                    v="%.20lg"%v
+                if isinstance(v, list):
+                    vs = v
                 else:
-                    v="\""+str(v)+"\""
+                    vs = [v]
 
-                G.update('INSERT DATA {{ gcn:gcn{gcnid} gcn:{prop} {value} }}'.format(gcnid=gcnid, prop=k, value=v))
+                for _v in vs:
+                    if isinstance(_v, float):
+                        _v="%.20lg"%_v
+                    else:
+                        _v="\""+str(_v)+"\""
+
+                    data = 'gcn:gcn{gcnid} gcn:{prop} {value}'.format(gcnid=gcnid, prop=k, value=_v)
+                    print("data:", data)
+
+                    G.update('INSERT DATA { '+data+' }')
 
             print()
 
@@ -191,8 +211,10 @@ def gcns_workflows(gcnid1, gcnid2):
     return G.serialize(format='n3').decode()
 
 @cli.command()
-def learn():
-    t = gcns_workflows(1500, 28000)
+@click.option("--from-gcnid","-f", default=1500)
+@click.option("--to-gcnid","-t", default=30000)
+def learn(from_gcnid, to_gcnid):
+    t = gcns_workflows(from_gcnid, to_gcnid)
     open("knowledge.n3", "w").write(t)
 
 @cli.command()
@@ -208,14 +230,16 @@ def contemplate():
 
     for rep_gcn_prop in "gcn:lvc_event_report", "gcn:reports_icecube_event":
         for r in G.query("""
-                    SELECT ?c ?ic_d ?ct_d ?t0 WHERE {{
-                            ?ic_g {rep_gcn_prop} ?c . 
-                            ?ct_g ?p ?c . 
-                            ?ic_g gcn:DATE ?ic_d . 
-                            ?ct_g gcn:DATE ?ct_d .
-                            ?ct_g gcn:original_event_utc ?t0 .
+                    SELECT ?c ?ic_d ?ct_d ?t0 ?instr WHERE {{
+                            ?ic_g {rep_gcn_prop} ?c;
+                                  gcn:DATE ?ic_d . 
+                            ?ct_g ?p ?c;
+                                  gcn:DATE ?ct_d;
+                                  gcn:original_event_utc ?t0;
+                                  gcn:instrument ?instr .
                         }}
                 """.format(rep_gcn_prop=rep_gcn_prop)):
+
             if r[1] != r[2]:
                 print(r)
                 s.append(dict(
@@ -223,7 +247,20 @@ def contemplate():
                         event_gcn_time=str(r[1]),
                         counterpart_gcn_time=str(r[2]),
                         event_t0=str(r[3]),
+                        instrument=str(r[4]),
                     ))
+
+    byevent = dict()
+
+    for i in s:
+        ev = i['event']
+        if ev in byevent:
+            byevent[ev]['instrument'].append(i['instrument'])
+        else:
+            byevent[ev] = i
+            byevent[ev]['instrument'] = [i['instrument']]
+
+    s = list(byevent.values())
 
     json.dump(s, open("counterpart_gcn_reaction_summary.json", "w"))
     
