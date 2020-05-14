@@ -35,10 +35,9 @@ class BoringGCN(Exception):
     "boring"
 
 
-async def gcn_source(gcnid: int, allow_net=False) -> str:  # -> gcn
+def gcn_source(gcnid: int, allow_net=False) -> str:  # -> gcn
     try:
-        t = open("gcn3/%i.gcn3" %
-                 gcnid, "rb").read().decode('ascii', 'replace')
+        t = open(f"gcn3/{gcnid}.gcn3", "rb").read().decode('ascii', 'replace')
         return t
     except FileNotFoundError:
         pass
@@ -47,7 +46,7 @@ async def gcn_source(gcnid: int, allow_net=False) -> str:  # -> gcn
         t = requests.get("https://gcn.gsfc.nasa.gov/gcn3/%i.gcn3" % gcnid).text
         return t
 
-    raise NoSuchGCN
+    raise NoSuchGCN(gcnid)
 
 
 def get_gcn_tag():
@@ -72,9 +71,9 @@ def gcn_instrument(gcntext: str):
     instruments = []
 
     for i, m in {
-        "fermi-gbm": "Fermi/GBM",
-        "fermi-lat": "Fermi/LAT",
-        "agile": "AGILE",
+            "fermi-gbm": "Fermi/GBM",
+            "fermi-lat": "Fermi/LAT",
+            "agile": "AGILE",
     }:
         if re.search(f"SUBJECT:.*{m}.*", gcntext):
             instruments.append(i)
@@ -173,8 +172,8 @@ def gcn_lvc_integral_counterpart(gcntext: str):  # ->
 
 
 @workflow
-async def gcn_workflows(gcnid: int, output='n3'):
-    gs = await gcn_source(gcnid)
+def gcn_workflows(gcnid: int, output='n3'):
+    gs = gcn_source(gcnid)
 
     gcn_ns = 'http://odahub.io/ontology/gcn#'
 
