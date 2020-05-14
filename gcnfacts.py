@@ -70,11 +70,17 @@ def _gcn_list_recent():
 
 @workflow
 def gcn_instrument(gcntext: str):
-    if re.search("SUBJECT:.*Fermi/GBM.*", gcntext):
-        return dict(instrument="Fermi/GBM")
+    instruments = []
 
-    return {}
+    for i, m in {
+        "fermi-gbm": "Fermi/GBM",
+        "fermi-lat": "Fermi/LAT",
+        "agile": "AGILE",
+    }:
+        if re.search(f"SUBJECT:.*{m}.*", gcntext):
+            instruments.append(i)
 
+    return dict(instrument=instruments)
 
 
 @workflow
@@ -204,7 +210,7 @@ def gcn_workflows(gcnid: int, output='n3'):
 
                     #G.update('INSERT DATA { '+data+' }')
 
-        except Exception as e: # pylint: disable=broad-except
+        except Exception as e:  # pylint: disable=broad-except
             logger.debug(f"{Fore.YELLOW} problem {Style.RESET_ALL} {repr(e)}")
 
     if len(list(facts)) <= 3:
@@ -225,27 +231,31 @@ def gcn_workflows(gcnid: int, output='n3'):
 
     raise Exception(f"unknown output {output}")
 
+def run_one_gcn(gcnid):
+    try:
+        return gcnid, gcn_workflows(gcnid, output='list')
+    except NoSuchGCN:
+        logger.debug(f"no GCN {gcnid}")
+    except BoringGCN:
+        logger.debug(f"boring GCN {gcnid}")
 
-
+    return gcnid, ""
 
 def gcns_workflows(gcnid1, gcnid2, nthreads=1):
     G = rdflib.Graph()
 
-    def run_one_gcn(gcnid):
-        try:
-            return gcnid, gcn_workflows(gcnid)
-        except NoSuchGCN:
-            logger.debug(f"no GCN {gcnid}")
-        except BoringGCN:
-            logger.debug(f"boring GCN {gcnid}")
+    G.bind('gcn', rdflib.Namespace('http://odahub.io/ontology/gcn#'))
 
-        return gcnid, ""
-
-    with futures.ThreadPoolExecutor(max_workers=nthreads) as ex:
+    #with futures.ThreadPoolExecutor(max_workers=nthreads) as ex:
+    with futures.ProcessPoolExecutor(max_workers=nthreads) as ex:
         for gcnid, d in ex.map(run_one_gcn, range(gcnid1, gcnid2)):
             logger.debug(f"{gcnid} gives: {len(d)}")
             for s in d:
-                G.update(f'INSERT DATA {{ {s} }}')
+                try:
+                    G.update(f'INSERT DATA {{ {s} }}')
+                except Exception as e:
+                    logger.error(f"problem {e}  adding \"{s}\"")
+                    raise Exception()
 
     return G.serialize(format='n3').decode()
 
