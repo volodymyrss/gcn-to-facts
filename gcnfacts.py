@@ -7,6 +7,11 @@ import click
 import rdflib
 from colorama import Fore, Back, Style
 
+import logging
+logging.basicConfig(level=logging.INFO)
+
+logger = logging.getLogger()
+
 workflow_context = []
 
 
@@ -27,10 +32,8 @@ class NoSuchGCN(Exception):
 class BoringGCN(Exception):
     pass
 
-@cli.command()
-@click.argument('gcnid', type=int)
 @workflow
-def _gcn_source(gcnid: int) -> str:  # -> gcn
+def gcn_source(gcnid: int) -> str:  # -> gcn
     if True:
         try:
             t = open("gcn3/%i.gcn3" % gcnid, "rb").read().decode('ascii', 'replace')
@@ -39,11 +42,10 @@ def _gcn_source(gcnid: int) -> str:  # -> gcn
             raise NoSuchGCN
     else:
         t = requests.get("https://gcn.gsfc.nasa.gov/gcn3/%i.gcn3" % gcnid).text
-        #print(t)
         return t
 
 def get_gcn_tag():
-    print("https://gcn.gsfc.nasa.gov/gcn3/all_gcn_circulars.tar.gz")
+    logger.debug("https://gcn.gsfc.nasa.gov/gcn3/all_gcn_circulars.tar.gz")
 
 @cli.command()
 @workflow
@@ -52,10 +54,10 @@ def _gcn_list_recent():
 
     r = re.findall(r"<A HREF=(gcn3/\d{1,5}.gcn3)>(\d{1,5})</A>", gt)
 
-    print("results", len(r))
+    logger.debug(f"results {len(r)}")
 
     for u, i in reversed(r):
-        print(u, i)
+        logger.debug(f"{u} {i}")
 
 
 @workflow
@@ -130,7 +132,7 @@ def gcn_grb_integral_circular(gcntext: str):  # ->
 
     grbname = r
     
-    grbtime = re.search("(\d\d:\d\d:\d\d) +UT", 
+    grbtime = re.search(r"(\d\d:\d\d:\d\d) +UT", 
                   gcntext, re.I).groups()[0].strip()
 
     date=grbname.replace("GRB","").strip()
@@ -149,18 +151,17 @@ def gcn_lvc_integral_counterpart(gcntext: str):  # ->
 def gcn_workflows(gcnid):
     gs = gcn_source(gcnid)
 
-    #print(gs)
-    
-    G = rdflib.Graph()
-    G.bind('gcn', rdflib.Namespace('http://odahub.io/ontology/gcn#'))
+    gcn_ns = 'http://odahub.io/ontology/gcn#'
+
+    facts = []
 
     for wn, w in workflow_context:
-        print("..\n", Fore.BLUE+wn+Style.RESET_ALL, w)
+        logger.debug(f".. {Fore.BLUE} {wn} {Style.RESET_ALL} {w}")
 
         try:
             o = w(gs)
 
-            print(Fore.GREEN+"found:"+Style.RESET_ALL, gcnid, wn, o)
+            logger.debug(f"{Fore.GREEN} found:  {Style.RESET_ALL} {gcnid} {wn} {o}")
 
             for k,v in o.items():
                 if isinstance(v, list):
@@ -174,57 +175,69 @@ def gcn_workflows(gcnid):
                     else:
                         _v="\""+str(_v)+"\""
 
-                    data = 'gcn:gcn{gcnid} gcn:{prop} {value}'.format(gcnid=gcnid, prop=k, value=_v)
-                    print("data:", data)
+                    data = '<{gcn_ns}gcn{gcnid}> <{gcn_ns}{prop}> {value}'.format(
+                                gcn_ns=gcn_ns, gcnid=gcnid, prop=k, value=_v
+                            )
 
-                    G.update('INSERT DATA { '+data+' }')
+                    facts.append(data)
 
-            print()
+                    #G.update('INSERT DATA { '+data+' }')
+
 
         except Exception as e:
-            print(Fore.YELLOW+"problem"+Style.RESET_ALL, repr(e))
+            logger.debug(f"{Fore.YELLOW} problem {Style.RESET_ALL} {repr(e)}")
 
-    #G.
-    print("gcn", gcnid, "facts", len(list(G)))
 
-    if len(list(G))<=3:
+    if len(list(facts))<=3:
         raise BoringGCN
+    
+    logger.info(f"gcn {gcnid} facts {len(facts)}")
 
-    return G.serialize(format='n3').decode()
+    return facts
+
+from concurrent import futures
 
 
-
-@workflow
-def gcns_workflows(gcnid1, gcnid2):
+def gcns_workflows(gcnid1, gcnid2, nthreads=1):
     G = rdflib.Graph()
 
-    for gcnid in range(gcnid1, gcnid2):
-        try:
-            t = gcn_workflows(gcnid)
-            G.parse(data=t, format="n3")
-        except NoSuchGCN:
-            print("no GCN %i"%gcnid)
-        except BoringGCN:
-            print("boring GCN %i"%gcnid)
 
+    def run_one_gcn(gcnid):
+        try:
+            return gcnid, gcn_workflows(gcnid)
+        except NoSuchGCN:
+            logger.debug(f"no GCN {gcnid}")
+        except BoringGCN:
+            logger.debug(f"boring GCN {gcnid}")
+
+        return gcnid, ""
+
+    with futures.ThreadPoolExecutor(max_workers=nthreads) as ex:
+        for gcnid, d in ex.map(run_one_gcn, range(gcnid1, gcnid2)):
+            logger.debug(f"{gcnid} gives: {len(d)}")
+            for s in d:
+                G.update(f'INSERT DATA {{ {s} }}')
 
     return G.serialize(format='n3').decode()
 
 @cli.command()
 @click.option("--from-gcnid","-f", default=1500)
 @click.option("--to-gcnid","-t", default=30000)
-def learn(from_gcnid, to_gcnid):
-    t = gcns_workflows(from_gcnid, to_gcnid)
+@click.option("--workers","-w", default=1)
+def learn(from_gcnid, to_gcnid, workers):
+    t = gcns_workflows(from_gcnid, to_gcnid, workers)
+
+    logger.info("read in total %i", len(t))
+
     open("knowledge.n3", "w").write(t)
 
 @cli.command()
-@workflow
 def contemplate():
     G = rdflib.Graph()
 
     G.parse("knowledge.n3", format="n3")
 
-    print("parsed", len(list(G)))
+    logger.info(f"parsed {len(list(G))}")
 
     s = []
 
@@ -241,7 +254,7 @@ def contemplate():
                 """.format(rep_gcn_prop=rep_gcn_prop)):
 
             if r[1] != r[2]:
-                print(r)
+                logger.debug(r)
                 s.append(dict(
                         event=str(r[0]),
                         event_gcn_time=str(r[1]),
@@ -273,7 +286,7 @@ def contemplate():
                         }}
                 """.format(rep_gcn_prop=rep_gcn_prop)):
         if r[1] != r[2]:
-            print(r)
+            logger.debug(r)
             s.append(dict(
                     event=str(r[0]),
                     event_t0=str(r[1]),

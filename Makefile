@@ -8,4 +8,4 @@ mypy:
 	mypy *py
 
 autopep8:
-	autopep8 *py
+	for p in *py; do autopep8 -i $$p; done
