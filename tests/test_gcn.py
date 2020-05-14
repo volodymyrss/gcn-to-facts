@@ -18,7 +18,7 @@ def test_icecube_counterpart_integral():
 
     print(mt)
     
-    ct = gf.gcn_countepart_search(
+    ct = gf.gcn_workflows(
                 gf.gcn_source(gcnid)
             )
 

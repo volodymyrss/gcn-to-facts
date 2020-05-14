@@ -1,3 +1,4 @@
+import logging
 from concurrent import futures
 import re
 import sys
@@ -6,9 +7,8 @@ from datetime import datetime
 import requests
 import click
 import rdflib
-from colorama import Fore, Back, Style
+from colorama import Fore, Style
 
-import logging
 logging.basicConfig(level=logging.INFO)
 
 logger = logging.getLogger()
@@ -28,11 +28,11 @@ def cli():
 
 
 class NoSuchGCN(Exception):
-    pass
+    "no such"
 
 
 class BoringGCN(Exception):
-    pass
+    "boring"
 
 
 @workflow
@@ -70,7 +70,11 @@ def _gcn_list_recent():
 
 @workflow
 def gcn_instrument(gcntext: str):
-    pass
+    if re.search("SUBJECT:.*Fermi/GBM.*", gcntext):
+        return dict(instrument="Fermi/GBM")
+
+    return {}
+
 
 
 @workflow
@@ -84,7 +88,7 @@ def gcn_meta(gcntext: str):  # ->
 
 
 @workflow
-def gcn_date(gcntext: str) -> float:  # date
+def gcn_date(gcntext: str) -> dict:  # date
     t = datetime.strptime(
         gcn_meta(gcntext)['DATE'], "%y/%m/%d %H:%M:%S GMT").timestamp()
 
@@ -157,14 +161,14 @@ def gcn_grb_integral_circular(gcntext: str):  # ->
 
 @workflow
 def gcn_lvc_integral_counterpart(gcntext: str):  # ->
-    r = re.search("SUBJECT:.*?(LIGO/Virgo .*?):.*INTEGRAL",
-                  gcntext, re.I).groups()[0].strip()
+    re.search("SUBJECT:.*?(LIGO/Virgo .*?):.*INTEGRAL",
+              gcntext, re.I).groups()[0].strip()
 
     return dict(lvc_counterpart_by="INTEGRAL")
 
 
 @workflow
-def gcn_workflows(gcnid):
+def gcn_workflows(gcnid: int, output='n3'):
     gs = gcn_source(gcnid)
 
     gcn_ns = 'http://odahub.io/ontology/gcn#'
@@ -200,7 +204,7 @@ def gcn_workflows(gcnid):
 
                     #G.update('INSERT DATA { '+data+' }')
 
-        except Exception as e:
+        except Exception as e: # pylint: disable=broad-except
             logger.debug(f"{Fore.YELLOW} problem {Style.RESET_ALL} {repr(e)}")
 
     if len(list(facts)) <= 3:
@@ -208,7 +212,20 @@ def gcn_workflows(gcnid):
 
     logger.info(f"gcn {gcnid} facts {len(facts)}")
 
-    return facts
+    if output == 'list':
+        return facts
+
+    if output == 'n3':
+        G = rdflib.Graph()
+
+        for s in facts:
+            G.update(f'INSERT DATA {{ {s} }}')
+
+        return G.serialize(format='n3').decode()
+
+    raise Exception(f"unknown output {output}")
+
+
 
 
 def gcns_workflows(gcnid1, gcnid2, nthreads=1):
@@ -240,7 +257,7 @@ def gcns_workflows(gcnid1, gcnid2, nthreads=1):
 def learn(from_gcnid, to_gcnid, workers):
     t = gcns_workflows(from_gcnid, to_gcnid, workers)
 
-    logger.info("read in total %i", len(t))
+    logger.info(f"read in total {len(t)}")
 
     open("knowledge.n3", "w").write(t)
 
@@ -298,7 +315,7 @@ def contemplate():
                             ?gcn gcn:DATE ?gcn_d . 
                             ?gcn gcn:event_t0 ?t0 .
                         }}
-                """.format(rep_gcn_prop=rep_gcn_prop)):
+                """):
         if r[1] != r[2]:
             logger.debug(r)
             s.append(dict(
