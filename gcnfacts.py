@@ -35,8 +35,7 @@ class BoringGCN(Exception):
     "boring"
 
 
-@workflow
-def gcn_source(gcnid: int, allow_net=False) -> str:  # -> gcn
+async def gcn_source(gcnid: int, allow_net=False) -> str:  # -> gcn
     try:
         t = open("gcn3/%i.gcn3" %
                  gcnid, "rb").read().decode('ascii', 'replace')
@@ -174,8 +173,8 @@ def gcn_lvc_integral_counterpart(gcntext: str):  # ->
 
 
 @workflow
-def gcn_workflows(gcnid: int, output='n3'):
-    gs = gcn_source(gcnid)
+async def gcn_workflows(gcnid: int, output='n3'):
+    gs = await gcn_source(gcnid)
 
     gcn_ns = 'http://odahub.io/ontology/gcn#'
 
@@ -246,7 +245,6 @@ def gcns_workflows(gcnid1, gcnid2, nthreads=1):
 
     G.bind('gcn', rdflib.Namespace('http://odahub.io/ontology/gcn#'))
 
-    #with futures.ThreadPoolExecutor(max_workers=nthreads) as ex:
     with futures.ProcessPoolExecutor(max_workers=nthreads) as ex:
         for gcnid, d in ex.map(run_one_gcn, range(gcnid1, gcnid2)):
             logger.debug(f"{gcnid} gives: {len(d)}")
@@ -295,7 +293,7 @@ def contemplate():
                 """.format(rep_gcn_prop=rep_gcn_prop)):
 
             if r[1] != r[2]:
-                logger.debug(r)
+                logger.info(r)
                 s.append(dict(
                     event=str(r[0]),
                     event_gcn_time=str(r[1]),
@@ -327,7 +325,7 @@ def contemplate():
                         }}
                 """):
         if r[1] != r[2]:
-            logger.debug(r)
+            logger.info(r)
             s.append(dict(
                 event=str(r[0]),
                 event_t0=str(r[1]),
