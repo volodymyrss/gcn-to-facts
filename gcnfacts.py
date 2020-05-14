@@ -6,8 +6,8 @@ import json
 from datetime import datetime
 import requests
 import click
-import rdflib
-from colorama import Fore, Style
+import rdflib # type: ignore
+from colorama import Fore, Style # type: ignore
 
 logging.basicConfig(level=logging.INFO)
 
