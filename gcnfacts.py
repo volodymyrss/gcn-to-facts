@@ -36,17 +36,19 @@ class BoringGCN(Exception):
 
 
 @workflow
-def gcn_source(gcnid: int) -> str:  # -> gcn
-    if True:
-        try:
-            t = open("gcn3/%i.gcn3" %
-                     gcnid, "rb").read().decode('ascii', 'replace')
-            return t
-        except FileNotFoundError:
-            raise NoSuchGCN
-    else:
+def gcn_source(gcnid: int, allow_net=False) -> str:  # -> gcn
+    try:
+        t = open("gcn3/%i.gcn3" %
+                 gcnid, "rb").read().decode('ascii', 'replace')
+        return t
+    except FileNotFoundError:
+        pass
+
+    if allow_net:
         t = requests.get("https://gcn.gsfc.nasa.gov/gcn3/%i.gcn3" % gcnid).text
         return t
+
+    raise NoSuchGCN
 
 
 def get_gcn_tag():
