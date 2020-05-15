@@ -1,4 +1,5 @@
 import logging
+import typing
 from concurrent import futures
 import re
 import sys
@@ -15,16 +16,23 @@ logger = logging.getLogger()
 
 workflow_context = []
 
+GCNText = typing.NewType("GCNText", str)
 
 def workflow(f):
     setattr(sys.modules[f.__module__], f.__name__[1:], f)
-    workflow_context.append((f.__name__, f))
+    workflow_context.append(dict(
+                name=f.__name__, 
+                function=f,
+                signature=f.__annotations__,
+            ))
     return f
 
 
 @click.group()
-def cli():
-    pass
+@click.option("--debug", "-d", default=False, is_flag=True)
+def cli(debug):
+    if debug:
+        logger.setLevel(logging.DEBUG)
 
 
 class NoSuchGCN(Exception):
@@ -35,16 +43,14 @@ class BoringGCN(Exception):
     "boring"
 
 
-def gcn_source(gcnid: int, allow_net=False) -> str:  # -> gcn
+def gcn_source(gcnid: int, allow_net=False) -> GCNText:  # -> gcn
     try:
         t = open(f"gcn3/{gcnid}.gcn3", "rb").read().decode('ascii', 'replace')
-        return t
+        return GCNText(t)
     except FileNotFoundError:
-        pass
-
-    if allow_net:
-        t = requests.get("https://gcn.gsfc.nasa.gov/gcn3/%i.gcn3" % gcnid).text
-        return t
+        if allow_net:
+            t = requests.get("https://gcn.gsfc.nasa.gov/gcn3/%i.gcn3" % gcnid).text
+            return GCNText(t)
 
     raise NoSuchGCN(gcnid)
 
@@ -67,14 +73,15 @@ def _gcn_list_recent():
 
 
 @workflow
-def gcn_instrument(gcntext: str):
+def gcn_instrument(gcntext: GCNText):
     instruments = []
 
-    for i, m in {
-            "fermi-gbm": "Fermi/GBM",
-            "fermi-lat": "Fermi/LAT",
-            "agile": "AGILE",
-    }:
+    for i, m in [
+            ("fermi-gbm", "Fermi/GBM"),
+            ("fermi-gbm", "Fermi GBM"),
+            ("fermi-lat", "Fermi/LAT"),
+            ("agile", "AGILE"),
+    ]:
         if re.search(f"SUBJECT:.*{m}.*", gcntext):
             instruments.append(i)
 
@@ -82,7 +89,7 @@ def gcn_instrument(gcntext: str):
 
 
 @workflow
-def gcn_meta(gcntext: str):  # ->
+def gcn_meta(gcntext: GCNText):  # ->
     d = {}
 
     for c in "DATE", "SUBJECT":
@@ -92,7 +99,7 @@ def gcn_meta(gcntext: str):  # ->
 
 
 @workflow
-def gcn_date(gcntext: str) -> dict:  # date
+def gcn_date(gcntext: GCNText) -> dict:  # date
     t = datetime.strptime(
         gcn_meta(gcntext)['DATE'], "%y/%m/%d %H:%M:%S GMT").timestamp()
 
@@ -100,7 +107,7 @@ def gcn_date(gcntext: str) -> dict:  # date
 
 
 @workflow
-def gcn_integral_lvc_countepart_search(gcntext: str):  # ->
+def gcn_integral_lvc_countepart_search(gcntext: GCNText):  # ->
     r = re.search("SUBJECT:(LIGO/Virgo.*?):.*INTEGRAL", gcntext, re.I)
 
     original_event = r.groups()[0].strip()
@@ -109,7 +116,7 @@ def gcn_integral_lvc_countepart_search(gcntext: str):  # ->
 
 
 @workflow
-def gcn_integral_countepart_search(gcntext: str):  # ->
+def gcn_integral_countepart_search(gcntext: GCNText):  # ->
     r = re.search("SUBJECT:(.*?):.*counterpart.*INTEGRAL", gcntext, re.I)
 
     original_event = r.groups()[0].strip()
@@ -132,7 +139,7 @@ def gcn_integral_countepart_search(gcntext: str):  # ->
 
 
 @workflow
-def gcn_icecube_circular(gcntext: str):  # ->
+def gcn_icecube_circular(gcntext: GCNText):  # ->
     r = re.search("SUBJECT:(.*?)- IceCube observation of a high-energy neutrino candidate event",
                   gcntext, re.I).groups()[0].strip()
 
@@ -140,7 +147,7 @@ def gcn_icecube_circular(gcntext: str):  # ->
 
 
 @workflow
-def gcn_lvc_circular(gcntext: str):  # ->
+def gcn_lvc_circular(gcntext: GCNText):  # ->
     r = re.search("SUBJECT:.*?(LIGO/Virgo .*?): Identification",
                   gcntext, re.I).groups()[0].strip()
 
@@ -148,7 +155,7 @@ def gcn_lvc_circular(gcntext: str):  # ->
 
 
 @workflow
-def gcn_grb_integral_circular(gcntext: str):  # ->
+def gcn_grb_integral_circular(gcntext: GCNText):  # ->
     r = re.search("SUBJECT:.*?(GRB.*?):.*INTEGRAL.*",
                   gcntext, re.I).groups()[0].strip()
 
@@ -164,14 +171,13 @@ def gcn_grb_integral_circular(gcntext: str):  # ->
 
 
 @workflow
-def gcn_lvc_integral_counterpart(gcntext: str):  # ->
+def gcn_lvc_integral_counterpart(gcntext: GCNText):  # ->
     re.search("SUBJECT:.*?(LIGO/Virgo .*?):.*INTEGRAL",
               gcntext, re.I).groups()[0].strip()
 
     return dict(lvc_counterpart_by="INTEGRAL")
 
 
-@workflow
 def gcn_workflows(gcnid: int, output='n3'):
     gs = gcn_source(gcnid)
 
@@ -179,14 +185,17 @@ def gcn_workflows(gcnid: int, output='n3'):
 
     facts = []
 
-    for wn, w in workflow_context:
-        logger.debug(f".. {Fore.BLUE} {wn} {Style.RESET_ALL} {w}")
+    for w in workflow_context:
+        logger.debug(f"{Fore.BLUE} {w['name']} {Style.RESET_ALL}")
+        logger.debug(f"   has {w['signature']}")
+
+        if not any((it is GCNText for it in w['signature'].values())):
+            continue
 
         try:
-            o = w(gs)
+            o = w['function'](gs)
 
-            logger.debug(
-                f"{Fore.GREEN} found:  {Style.RESET_ALL} {gcnid} {wn} {o}")
+            logger.debug(f"   {Fore.GREEN} found:  {Style.RESET_ALL} {gcnid} {w['name']} {o}")
 
             for k, v in o.items():
                 if isinstance(v, list):
@@ -206,10 +215,8 @@ def gcn_workflows(gcnid: int, output='n3'):
 
                     facts.append(data)
 
-                    #G.update('INSERT DATA { '+data+' }')
-
-        except Exception as e:  # pylint: disable=broad-except
-            logger.debug(f"{Fore.YELLOW} problem {Style.RESET_ALL} {repr(e)}")
+        except (AttributeError, ValueError) as e: 
+            logger.debug(f"  {Fore.YELLOW} problem {Style.RESET_ALL} {repr(e)}")
 
     if len(list(facts)) <= 3:
         raise BoringGCN
@@ -330,6 +337,7 @@ def contemplate():
                 event_t0=str(r[1]),
                 event_gcn_time=str(r[2]),
             ))
+
     json.dump(s, open("grb_gcn_reaction_summary.json", "w"))
 
 

@@ -5,7 +5,7 @@ pylint:
 	pylint --exit-zero *py tests/*py --disable invalid-name,missing-function-docstring,missing-module-docstring
 
 mypy:
-	mypy *py tests/*py || true
+	mypy *py tests/*py 
 
 test:
 	python -m pytest tests

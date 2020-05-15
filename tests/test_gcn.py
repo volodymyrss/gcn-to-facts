@@ -34,7 +34,7 @@ def test_icecube_counterpart_integral():
     
 def test_workflows():
     import gcnfacts as gf
-    import rdflib
+    import rdflib # type: ignore
 
     G = rdflib.Graph()
 
